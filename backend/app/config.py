@@ -23,6 +23,14 @@ class Settings(BaseSettings):
     cloudradial_public_key: str
     cloudradial_private_key: str
 
+    sophos_client_id: str
+    sophos_client_secret: str
+
+    connectsecure_base_url: str = "https://pod102.myconnectsecure.com"
+    connectsecure_tenant: str
+    connectsecure_client_id: str
+    connectsecure_client_secret: str
+
     cors_origins: str = "http://localhost:5173"
 
     @property
