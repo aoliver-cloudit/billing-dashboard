@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "blackpoint-docs": {
+      "type": "http",
+      "url": "https://docs.blackpointcyber.com/mcp"
+    }
+  }
+}
