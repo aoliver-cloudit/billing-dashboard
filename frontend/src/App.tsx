@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 
-interface Customer {
+export interface Customer {
   id: number
   identifier: string
   name: string
@@ -13,16 +13,16 @@ interface Customer {
 
 const MAX_SUGGESTIONS = 20
 
-interface Matchable {
+export interface Matchable {
   matched: boolean
 }
 
-interface DeploymentResult<T> {
+export interface DeploymentResult<T> {
   data: T | null
   error: string | null
 }
 
-async function describeHttpError(res: Response): Promise<string> {
+export async function describeHttpError(res: Response): Promise<string> {
   let detail = ''
   try {
     const body = await res.json()
@@ -38,7 +38,7 @@ async function describeHttpError(res: Response): Promise<string> {
   return snippet ? `HTTP ${res.status}: ${snippet}` : `HTTP ${res.status}`
 }
 
-function useDeployment<T extends Matchable>(
+export function useDeployment<T extends Matchable>(
   url: string,
   onResult?: (result: DeploymentResult<T>) => void,
 ) {
@@ -166,39 +166,39 @@ function IntegrationSection<T extends Matchable>({
   )
 }
 
-interface BlackpointDeployment extends Matchable {
+export interface BlackpointDeployment extends Matchable {
   tenant_id: string | null
   tenant_name: string | null
   endpoint_mdr_count: number | null
   cloud_identity_mdr_count: number | null
 }
 
-interface NinjaDeployment extends Matchable {
+export interface NinjaDeployment extends Matchable {
   organization_id: number | null
   organization_name: string | null
   device_count: number | null
 }
 
-interface CloudRadialDeployment extends Matchable {
+export interface CloudRadialDeployment extends Matchable {
   company_id: number | null
   company_name: string | null
   device_count: number | null
 }
 
-interface SophosDeployment extends Matchable {
+export interface SophosDeployment extends Matchable {
   tenant_id: string | null
   tenant_name: string | null
   device_count: number | null
   encrypted_count: number | null
 }
 
-interface ConnectSecureDeployment extends Matchable {
+export interface ConnectSecureDeployment extends Matchable {
   company_id: number | null
   company_name: string | null
   device_count: number | null
 }
 
-interface EvoDeployment extends Matchable {
+export interface EvoDeployment extends Matchable {
   tenant_id: string | null
   tenant_name: string | null
   mfa_sso_count: number | null
@@ -207,7 +207,7 @@ interface EvoDeployment extends Matchable {
   help_desk_verification_count: number | null
 }
 
-interface DropsuiteDeployment extends Matchable {
+export interface DropsuiteDeployment extends Matchable {
   organization_id: string | null
   organization_name: string | null
   seats_used: number | null
@@ -245,7 +245,7 @@ async function fetchJsonOrNull<T>(url: string): Promise<T | null> {
   }
 }
 
-function SyncModal({ customer, onClose }: { customer: Customer; onClose: () => void }) {
+export function SyncModal({ customer, onClose }: { customer: Customer; onClose: () => void }) {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [additions, setAdditions] = useState<Addition[]>([])

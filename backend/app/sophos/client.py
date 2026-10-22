@@ -3,7 +3,7 @@ import time
 import httpx
 
 from app.config import Settings
-from app.sophos.schemas import SophosDeployment
+from app.sophos.schemas import SophosDeployment, SophosEndpoint, SophosEndpointList
 
 TOKEN_URL = "https://id.sophos.com/api/v2/oauth2/token"
 WHOAMI_URL = "https://api.central.sophos.com/whoami/v1"
@@ -109,15 +109,11 @@ class SophosClient:
 
         return response.json().get("pages", {}).get("items", 0)
 
-    async def _get_disk_encrypted_count(
+    async def _get_all_endpoints(
         self, client: httpx.AsyncClient, token: str, tenant: dict
-    ) -> int:
-        # The `overallEncryptionStatus` query filter's documented enum doesn't
-        # include every value Sophos actually reports (e.g. "unmanaged"), so it
-        # silently matches nothing for tenants using those values. Count
-        # client-side from the full endpoint list instead.
+    ) -> list[dict]:
         headers = {"Authorization": f"Bearer {token}", "X-Tenant-ID": tenant["id"]}
-        count = 0
+        endpoints: list[dict] = []
         page_from_key: str | None = None
 
         while True:
@@ -132,14 +128,68 @@ class SophosClient:
                 raise SophosAPIError(response.status_code, response.text)
 
             payload = response.json()
-            for item in payload.get("items", []):
-                encryption = item.get("encryption") or {}
-                if encryption.get("overallStatus") == "encrypted":
-                    count += 1
+            endpoints.extend(payload.get("items", []))
 
             page_from_key = payload.get("pages", {}).get("nextKey")
             if not page_from_key:
-                return count
+                return endpoints
+
+    async def _get_disk_encrypted_count(
+        self, client: httpx.AsyncClient, token: str, tenant: dict
+    ) -> int:
+        # The `overallEncryptionStatus` query filter's documented enum doesn't
+        # include every value Sophos actually reports (e.g. "unmanaged"), so it
+        # silently matches nothing for tenants using those values. Count
+        # client-side from the full endpoint list instead.
+        endpoints = await self._get_all_endpoints(client, token, tenant)
+        return sum(
+            1
+            for item in endpoints
+            if (item.get("encryption") or {}).get("overallStatus") == "encrypted"
+        )
+
+    async def get_endpoints(self, customer_name: str) -> SophosEndpointList:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            token = await self._get_access_token(client)
+            auth_header = {"Authorization": f"Bearer {token}"}
+
+            partner_id = await self._get_partner_id(client, auth_header)
+            partner_headers = {**auth_header, "X-Partner-ID": partner_id}
+
+            tenant = await self._find_tenant(client, partner_headers, customer_name)
+            if not tenant:
+                return SophosEndpointList(matched=False)
+
+            items = await self._get_all_endpoints(client, token, tenant)
+            endpoints = [
+                SophosEndpoint(
+                    id=item["id"],
+                    hostname=item.get("hostname"),
+                    online=item.get("online"),
+                    last_seen_at=item.get("lastSeenAt"),
+                    last_user=(item.get("associatedPerson") or {}).get("name"),
+                    encryption_status=(item.get("encryption") or {}).get("overallStatus"),
+                    health_status=(item.get("health") or {}).get("overall"),
+                    threats_status=((item.get("health") or {}).get("threats") or {}).get("status"),
+                    services_status=((item.get("health") or {}).get("services") or {}).get(
+                        "status"
+                    ),
+                    protected=any(
+                        product.get("code") == "endpointProtection"
+                        and product.get("status") == "installed"
+                        for product in item.get("assignedProducts") or []
+                    ),
+                )
+                for item in items
+            ]
+            endpoints.sort(key=lambda e: (e.hostname or "").lower())
+
+            return SophosEndpointList(
+                matched=True,
+                tenant_id=tenant.get("id"),
+                tenant_name=tenant.get("showAs") or tenant.get("name"),
+                endpoints=endpoints,
+            )
 
     async def get_deployment(self, customer_name: str) -> SophosDeployment:
         async with httpx.AsyncClient(timeout=30.0) as client:
