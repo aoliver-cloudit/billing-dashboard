@@ -9,7 +9,7 @@ router = APIRouter(prefix="/api/customers", tags=["customers"])
 
 @router.get("", response_model=list[Customer])
 async def list_customers(
-    status_name: str | None = "Active",
+    status_name: str | None = None,
     settings: Settings = Depends(get_settings),
 ) -> list[Customer]:
     client = ConnectWiseClient(settings)
