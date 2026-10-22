@@ -1,6 +1,12 @@
 from pydantic import BaseModel
 
 
+class NinjaOnboardResult(BaseModel):
+    created: bool
+    organization_id: int | None = None
+    organization_name: str | None = None
+
+
 class NinjaDeployment(BaseModel):
     matched: bool
     organization_id: int | None = None

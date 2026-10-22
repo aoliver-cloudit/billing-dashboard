@@ -8,6 +8,8 @@ from app.routers import (
     connectsecure,
     connectwise_sync,
     customers,
+    dropsuite,
+    evo,
     ninja,
     sophos,
 )
@@ -29,6 +31,8 @@ app.include_router(cloudradial.router)
 app.include_router(sophos.router)
 app.include_router(connectsecure.router)
 app.include_router(connectwise_sync.router)
+app.include_router(evo.router)
+app.include_router(dropsuite.router)
 
 
 @app.get("/api/health")

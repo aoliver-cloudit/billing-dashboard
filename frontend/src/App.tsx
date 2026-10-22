@@ -76,18 +76,45 @@ function useDeployment<T extends Matchable>(
 
 function IntegrationSection<T extends Matchable>({
   name,
+  customerName,
   url,
+  onboardUrl,
+  onboardLink,
   onResult,
   notFoundText,
   renderStats,
 }: {
   name: string
+  customerName: string
   url: string
+  onboardUrl?: string
+  // For products with no create API: Onboard opens the product's own portal instead.
+  onboardLink?: string
   onResult?: (result: DeploymentResult<T>) => void
   notFoundText: string
   renderStats: (data: T) => React.ReactNode
 }) {
   const { data, error, loading, check } = useDeployment<T>(url, onResult)
+  const [onboarding, setOnboarding] = useState(false)
+  const [onboardError, setOnboardError] = useState<string | null>(null)
+
+  function onboard() {
+    if (!onboardUrl) return
+    const confirmed = window.confirm(
+      `Create "${customerName}" in ${name}?\n\nThis creates a new record for this customer in ${name}.`,
+    )
+    if (!confirmed) return
+
+    setOnboarding(true)
+    setOnboardError(null)
+    fetch(onboardUrl, { method: 'POST' })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(await describeHttpError(res))
+      })
+      .then(() => check())
+      .catch((err: Error) => setOnboardError(err.message))
+      .finally(() => setOnboarding(false))
+  }
 
   return (
     <div className="integration">
@@ -103,7 +130,36 @@ function IntegrationSection<T extends Matchable>({
         data.matched ? (
           renderStats(data)
         ) : (
-          <p className="not-found">{notFoundText}</p>
+          <>
+            <div className="not-found-row">
+              <p className="not-found">{notFoundText}</p>
+              {onboardLink ? (
+                <a
+                  className="onboard-button"
+                  href={onboardLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={`${name} has no create API. Opens its portal to add "${customerName}" manually`}
+                >
+                  Onboard
+                </a>
+              ) : (
+                <button
+                  className="onboard-button"
+                  onClick={onboard}
+                  disabled={!onboardUrl || onboarding || loading}
+                  title={
+                    onboardUrl
+                      ? `Create this customer in ${name}`
+                      : `Onboarding for ${name} isn't built yet`
+                  }
+                >
+                  {onboarding ? 'Onboarding...' : 'Onboard'}
+                </button>
+              )}
+            </div>
+            {onboardError && <p className="api-error">Onboard failed: {onboardError}</p>}
+          </>
         )
       ) : null}
     </div>
@@ -140,6 +196,21 @@ interface ConnectSecureDeployment extends Matchable {
   company_id: number | null
   company_name: string | null
   device_count: number | null
+}
+
+interface EvoDeployment extends Matchable {
+  tenant_id: string | null
+  tenant_name: string | null
+  mfa_sso_count: number | null
+  technician_elevation_count: number | null
+  end_user_elevation_count: number | null
+  help_desk_verification_count: number | null
+}
+
+interface DropsuiteDeployment extends Matchable {
+  organization_id: string | null
+  organization_name: string | null
+  seats_used: number | null
 }
 
 interface Addition {
@@ -207,8 +278,12 @@ function SyncModal({ customer, onClose }: { customer: Customer; onClose: () => v
       fetchJsonOrNull<ConnectSecureDeployment>(
         `/api/connectsecure/deployment?customer_name=${encodedName}`,
       ),
+      fetchJsonOrNull<EvoDeployment>(`/api/evo/deployment?customer_name=${encodedName}`),
+      fetchJsonOrNull<DropsuiteDeployment>(
+        `/api/dropsuite/deployment?customer_name=${encodedName}`,
+      ),
     ])
-      .then(([additionsData, bp, ninja, cr, sophos, cs]) => {
+      .then(([additionsData, bp, ninja, cr, sophos, cs, evo, dropsuite]) => {
         if (cancelled) return
         setAdditions(additionsData)
         setToolOptions([
@@ -242,6 +317,31 @@ function SyncModal({ customer, onClose }: { customer: Customer; onClose: () => v
             key: 'connectsecure',
             label: 'ConnectSecure',
             count: cs?.matched ? cs.device_count : null,
+          },
+          {
+            key: 'evo_mfa_sso',
+            label: 'Evo MFA and SSO',
+            count: evo?.matched ? evo.mfa_sso_count : null,
+          },
+          {
+            key: 'evo_technician_elevation',
+            label: 'Evo Technician Elevation',
+            count: evo?.matched ? evo.technician_elevation_count : null,
+          },
+          {
+            key: 'evo_end_user_elevation',
+            label: 'Evo End User Elevation',
+            count: evo?.matched ? evo.end_user_elevation_count : null,
+          },
+          {
+            key: 'evo_help_desk_verification',
+            label: 'Evo Help Desk Verification',
+            count: evo?.matched ? evo.help_desk_verification_count : null,
+          },
+          {
+            key: 'dropsuite',
+            label: 'Dropsuite Seats Used',
+            count: dropsuite?.matched ? dropsuite.seats_used : null,
           },
         ])
       })
@@ -407,6 +507,8 @@ interface CustomerCardProps {
   onCloudRadialResult?: (result: DeploymentResult<CloudRadialDeployment>) => void
   onSophosResult?: (result: DeploymentResult<SophosDeployment>) => void
   onConnectSecureResult?: (result: DeploymentResult<ConnectSecureDeployment>) => void
+  onEvoResult?: (result: DeploymentResult<EvoDeployment>) => void
+  onDropsuiteResult?: (result: DeploymentResult<DropsuiteDeployment>) => void
 }
 
 function CustomerCard({
@@ -416,6 +518,8 @@ function CustomerCard({
   onCloudRadialResult,
   onSophosResult,
   onConnectSecureResult,
+  onEvoResult,
+  onDropsuiteResult,
 }: CustomerCardProps) {
   const encodedName = encodeURIComponent(customer.name)
   const [syncOpen, setSyncOpen] = useState(false)
@@ -451,7 +555,9 @@ function CustomerCard({
 
       <IntegrationSection<BlackpointDeployment>
         name="Blackpoint MDR"
+        customerName={customer.name}
         url={`/api/blackpoint/deployment?customer_name=${encodedName}`}
+        onboardLink="https://compassone.blackpointcyber.com"
         onResult={onBlackpointResult}
         notFoundText="No matching tenant found in Blackpoint"
         renderStats={(d) => (
@@ -465,7 +571,9 @@ function CustomerCard({
       />
       <IntegrationSection<NinjaDeployment>
         name="NinjaRMM"
+        customerName={customer.name}
         url={`/api/ninja/deployment?customer_name=${encodedName}`}
+        onboardUrl={`/api/ninja/onboard?customer_name=${encodedName}`}
         onResult={onNinjaResult}
         notFoundText="No matching organization found in NinjaRMM"
         renderStats={(d) => (
@@ -477,6 +585,7 @@ function CustomerCard({
       />
       <IntegrationSection<CloudRadialDeployment>
         name="CloudRadial"
+        customerName={customer.name}
         url={`/api/cloudradial/deployment?customer_name=${encodedName}`}
         onResult={onCloudRadialResult}
         notFoundText="No matching company found in CloudRadial"
@@ -489,6 +598,7 @@ function CustomerCard({
       />
       <IntegrationSection<SophosDeployment>
         name="Sophos Endpoint"
+        customerName={customer.name}
         url={`/api/sophos/deployment?customer_name=${encodedName}`}
         onResult={onSophosResult}
         notFoundText="No matching tenant found in Sophos"
@@ -503,6 +613,7 @@ function CustomerCard({
       />
       <IntegrationSection<ConnectSecureDeployment>
         name="ConnectSecure"
+        customerName={customer.name}
         url={`/api/connectsecure/deployment?customer_name=${encodedName}`}
         onResult={onConnectSecureResult}
         notFoundText="No matching company found in ConnectSecure"
@@ -510,6 +621,39 @@ function CustomerCard({
           <dl className="integration-stats">
             <dt>Devices</dt>
             <dd>{d.device_count} registered</dd>
+          </dl>
+        )}
+      />
+      <IntegrationSection<EvoDeployment>
+        name="Evo Security"
+        customerName={customer.name}
+        url={`/api/evo/deployment?customer_name=${encodedName}`}
+        onboardUrl={`/api/evo/onboard?customer_name=${encodedName}`}
+        onResult={onEvoResult}
+        notFoundText="No matching tenant found in Evo Security"
+        renderStats={(d) => (
+          <dl className="integration-stats">
+            <dt>MFA and SSO</dt>
+            <dd>{d.mfa_sso_count}</dd>
+            <dt>Technician Elevation</dt>
+            <dd>{d.technician_elevation_count}</dd>
+            <dt>End User Elevation</dt>
+            <dd>{d.end_user_elevation_count}</dd>
+            <dt>Help Desk Verification</dt>
+            <dd>{d.help_desk_verification_count}</dd>
+          </dl>
+        )}
+      />
+      <IntegrationSection<DropsuiteDeployment>
+        name="Dropsuite"
+        customerName={customer.name}
+        url={`/api/dropsuite/deployment?customer_name=${encodedName}`}
+        onResult={onDropsuiteResult}
+        notFoundText="No matching organization found in Dropsuite"
+        renderStats={(d) => (
+          <dl className="integration-stats">
+            <dt>Seats Used</dt>
+            <dd>{d.seats_used}</dd>
           </dl>
         )}
       />
@@ -580,6 +724,8 @@ function SummaryCard({
   cloudradialResults,
   sophosResults,
   connectsecureResults,
+  evoResults,
+  dropsuiteResults,
 }: {
   totalCustomers: number
   blackpointResults: Record<number, DeploymentResult<BlackpointDeployment> | undefined>
@@ -587,6 +733,8 @@ function SummaryCard({
   cloudradialResults: Record<number, DeploymentResult<CloudRadialDeployment> | undefined>
   sophosResults: Record<number, DeploymentResult<SophosDeployment> | undefined>
   connectsecureResults: Record<number, DeploymentResult<ConnectSecureDeployment> | undefined>
+  evoResults: Record<number, DeploymentResult<EvoDeployment> | undefined>
+  dropsuiteResults: Record<number, DeploymentResult<DropsuiteDeployment> | undefined>
 }) {
   const bp = summarize(blackpointResults, (d) => d.endpoint_mdr_count)
   const bpCloud = summarize(blackpointResults, (d) => d.cloud_identity_mdr_count)
@@ -595,6 +743,11 @@ function SummaryCard({
   const sophos = summarize(sophosResults, (d) => d.device_count)
   const sophosEncrypted = summarize(sophosResults, (d) => d.encrypted_count)
   const connectsecure = summarize(connectsecureResults, (d) => d.device_count)
+  const evoMfaSso = summarize(evoResults, (d) => d.mfa_sso_count)
+  const evoTechnicianElevation = summarize(evoResults, (d) => d.technician_elevation_count)
+  const evoEndUserElevation = summarize(evoResults, (d) => d.end_user_elevation_count)
+  const evoHelpDeskVerification = summarize(evoResults, (d) => d.help_desk_verification_count)
+  const dropsuite = summarize(dropsuiteResults, (d) => d.seats_used)
 
   return (
     <div className="summary-card">
@@ -637,9 +790,126 @@ function SummaryCard({
           summary={connectsecure}
           totalCustomers={totalCustomers}
         />
+        <SummaryRow
+          label="Evo MFA and SSO"
+          unit="licenses"
+          summary={evoMfaSso}
+          totalCustomers={totalCustomers}
+        />
+        <SummaryRow
+          label="Evo Technician Elevation"
+          unit="licenses"
+          summary={evoTechnicianElevation}
+          totalCustomers={totalCustomers}
+        />
+        <SummaryRow
+          label="Evo End User Elevation"
+          unit="licenses"
+          summary={evoEndUserElevation}
+          totalCustomers={totalCustomers}
+        />
+        <SummaryRow
+          label="Evo Help Desk Verification"
+          unit="licenses"
+          summary={evoHelpDeskVerification}
+          totalCustomers={totalCustomers}
+        />
+        <SummaryRow
+          label="Dropsuite"
+          unit="seats"
+          summary={dropsuite}
+          totalCustomers={totalCustomers}
+        />
       </dl>
     </div>
   )
+}
+
+interface AllResults {
+  blackpoint: Record<number, DeploymentResult<BlackpointDeployment> | undefined>
+  ninja: Record<number, DeploymentResult<NinjaDeployment> | undefined>
+  cloudradial: Record<number, DeploymentResult<CloudRadialDeployment> | undefined>
+  sophos: Record<number, DeploymentResult<SophosDeployment> | undefined>
+  connectsecure: Record<number, DeploymentResult<ConnectSecureDeployment> | undefined>
+  evo: Record<number, DeploymentResult<EvoDeployment> | undefined>
+  dropsuite: Record<number, DeploymentResult<DropsuiteDeployment> | undefined>
+}
+
+const CSV_FORMULA_PREFIXES = ['=', '+', '-', '@', '\t', '\r']
+
+function csvCell(value: string | number | null | undefined): string {
+  if (value === null || value === undefined) return ''
+  let text = String(value)
+  // Stop spreadsheet apps from evaluating text cells that start with a formula character.
+  if (typeof value === 'string' && text && CSV_FORMULA_PREFIXES.includes(text[0])) {
+    text = `'${text}`
+  }
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
+}
+
+// Blank means no match in that tool; ERROR means the integration's API call failed.
+function metricCell<T extends Matchable>(
+  result: DeploymentResult<T> | undefined,
+  countOf: (data: T) => number | null,
+): string | number {
+  if (!result) return ''
+  if (result.error) return 'ERROR'
+  return result.data?.matched ? (countOf(result.data) ?? '') : ''
+}
+
+function buildCsv(customers: Customer[], results: AllResults): string {
+  const header = [
+    'Customer',
+    'Identifier',
+    'Status',
+    'Tags',
+    'Blackpoint Endpoint MDR',
+    'Blackpoint Cloud & Identity MDR',
+    'NinjaRMM Devices',
+    'CloudRadial Devices',
+    'Sophos Devices',
+    'Sophos Disk Encrypted',
+    'ConnectSecure Devices',
+    'Evo MFA and SSO',
+    'Evo Technician Elevation',
+    'Evo End User Elevation',
+    'Evo Help Desk Verification',
+    'Dropsuite Seats Used',
+  ]
+
+  const rows = customers.map((c) => [
+    c.name,
+    c.identifier,
+    c.status,
+    c.types.join('; '),
+    metricCell(results.blackpoint[c.id], (d) => d.endpoint_mdr_count),
+    metricCell(results.blackpoint[c.id], (d) => d.cloud_identity_mdr_count),
+    metricCell(results.ninja[c.id], (d) => d.device_count),
+    metricCell(results.cloudradial[c.id], (d) => d.device_count),
+    metricCell(results.sophos[c.id], (d) => d.device_count),
+    metricCell(results.sophos[c.id], (d) => d.encrypted_count),
+    metricCell(results.connectsecure[c.id], (d) => d.device_count),
+    metricCell(results.evo[c.id], (d) => d.mfa_sso_count),
+    metricCell(results.evo[c.id], (d) => d.technician_elevation_count),
+    metricCell(results.evo[c.id], (d) => d.end_user_elevation_count),
+    metricCell(results.evo[c.id], (d) => d.help_desk_verification_count),
+    metricCell(results.dropsuite[c.id], (d) => d.seats_used),
+  ])
+
+  return [header, ...rows].map((row) => row.map(csvCell).join(',')).join('\r\n')
+}
+
+function downloadCsv(filename: string, csv: string) {
+  // The BOM makes Excel read the file as UTF-8.
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
 }
 
 function App() {
@@ -668,6 +938,12 @@ function App() {
   >({})
   const [connectsecureResults, setConnectsecureResults] = useState<
     Record<number, DeploymentResult<ConnectSecureDeployment> | undefined>
+  >({})
+  const [evoResults, setEvoResults] = useState<
+    Record<number, DeploymentResult<EvoDeployment> | undefined>
+  >({})
+  const [dropsuiteResults, setDropsuiteResults] = useState<
+    Record<number, DeploymentResult<DropsuiteDeployment> | undefined>
   >({})
 
   useEffect(() => {
@@ -721,7 +997,37 @@ function App() {
     setCloudradialResults({})
     setSophosResults({})
     setConnectsecureResults({})
+    setEvoResults({})
+    setDropsuiteResults({})
   }, [selectedType])
+
+  const resultMaps = [
+    blackpointResults,
+    ninjaResults,
+    cloudradialResults,
+    sophosResults,
+    connectsecureResults,
+    evoResults,
+    dropsuiteResults,
+  ]
+  const exportReady =
+    taggedCustomers.length > 0 &&
+    taggedCustomers.every((c) => resultMaps.every((m) => m[c.id] !== undefined))
+
+  function handleExportCsv() {
+    const csv = buildCsv(taggedCustomers, {
+      blackpoint: blackpointResults,
+      ninja: ninjaResults,
+      cloudradial: cloudradialResults,
+      sophos: sophosResults,
+      connectsecure: connectsecureResults,
+      evo: evoResults,
+      dropsuite: dropsuiteResults,
+    })
+    const tag = selectedType.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '')
+    const date = new Date().toISOString().slice(0, 10)
+    downloadCsv(`deployment-${tag}-${date}.csv`, csv)
+  }
 
   function selectCustomer(customer: Customer) {
     setSelected(customer)
@@ -804,11 +1110,21 @@ function App() {
 
           {selectedType && (
             <div className="tag-results">
-              <p className="count">
-                {taggedCustomers.length} customer{taggedCustomers.length === 1 ? '' : 's'} tagged
-                &nbsp;
-                <span className="tag">{selectedType}</span>
-              </p>
+              <div className="tag-results-header">
+                <p className="count">
+                  {taggedCustomers.length} customer{taggedCustomers.length === 1 ? '' : 's'} tagged
+                  &nbsp;
+                  <span className="tag">{selectedType}</span>
+                </p>
+                <button
+                  className="export-csv-button"
+                  onClick={handleExportCsv}
+                  disabled={!exportReady}
+                  title={exportReady ? 'Download these results as a CSV' : 'Waiting for all lookups to finish'}
+                >
+                  {exportReady ? 'Export CSV' : 'Loading...'}
+                </button>
+              </div>
 
               {taggedCustomers.length > 0 && (
                 <SummaryCard
@@ -818,6 +1134,8 @@ function App() {
                   cloudradialResults={cloudradialResults}
                   sophosResults={sophosResults}
                   connectsecureResults={connectsecureResults}
+                  evoResults={evoResults}
+                  dropsuiteResults={dropsuiteResults}
                 />
               )}
 
@@ -839,6 +1157,10 @@ function App() {
                   }
                   onConnectSecureResult={(result) =>
                     setConnectsecureResults((prev) => ({ ...prev, [c.id]: result }))
+                  }
+                  onEvoResult={(result) => setEvoResults((prev) => ({ ...prev, [c.id]: result }))}
+                  onDropsuiteResult={(result) =>
+                    setDropsuiteResults((prev) => ({ ...prev, [c.id]: result }))
                   }
                 />
               ))}

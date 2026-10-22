@@ -29,13 +29,19 @@ class ConnectWiseClient:
             "Accept": "application/json",
         }
 
-    async def get_all_customers(self, status_name: str | None = "Active") -> list[Customer]:
+    async def get_all_customers(
+        self,
+        status_name: str | None = None,
+        exclude_status: str | None = "Inactive/Gone",
+    ) -> list[Customer]:
         customers: list[Customer] = []
         page = 1
 
         conditions = "deletedFlag=false"
         if status_name:
             conditions += f' and status/name="{status_name}"'
+        elif exclude_status:
+            conditions += f' and status/name!="{exclude_status}"'
 
         async with httpx.AsyncClient(base_url=self._base_url, headers=self._headers, timeout=30.0) as client:
             while True:
@@ -60,8 +66,8 @@ class ConnectWiseClient:
                     customers.append(
                         Customer(
                             id=record["id"],
-                            identifier=record.get("identifier", ""),
-                            name=record.get("name", ""),
+                            identifier=record.get("identifier", "").strip(),
+                            name=record.get("name", "").strip(),
                             status=(record.get("status") or {}).get("name"),
                             types=[t["name"] for t in record.get("types") or [] if t.get("name")],
                             market=(record.get("market") or {}).get("name"),
